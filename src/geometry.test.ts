@@ -64,6 +64,32 @@ test("todas las plantillas generan celdas dentro del lienzo, sin solaparse", () 
   }
 });
 
+test("las plantillas de cortes cruzados tienen celdas que cruzan cada corte y ninguna demasiado estrecha", () => {
+  const crossing = ["staggered", "panorama-strip", "seam-portraits", "bridges", "brick", "staircase", "panorama-bands"];
+  for (const id of crossing) {
+    const t = TEMPLATES.find((x) => x.id === id);
+    assert.ok(t, `${id} existe`);
+    for (const n of [2, 3, 5]) {
+      const cells = templateCells(t, { slideWidth: 1080, slideHeight: 1350, slideCount: n }, 0);
+      for (let seam = 1; seam < n; seam++) {
+        const x = seam * 1080;
+        assert.ok(
+          cells.some((c) => c.x < x - 1e-9 && c.x + c.width > x + 1e-9),
+          `${id} n=${n}: ninguna celda cruza el corte ${seam}`,
+        );
+      }
+      for (const c of cells) {
+        assert.ok(c.width >= 200 && c.height >= 200, `${id} n=${n}: celda demasiado pequeña (${c.width}×${c.height})`);
+      }
+    }
+  }
+});
+
+test("los identificadores de plantilla son únicos", () => {
+  const ids = TEMPLATES.map((t) => t.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
 test("la plantilla panorámica tiene una celda que cruza todos los cortes", () => {
   const t = TEMPLATES.find((x) => x.id === "panorama-strip")!;
   const cells = templateCells(t, { slideWidth: 1080, slideHeight: 1350, slideCount: 3 }, 0);
