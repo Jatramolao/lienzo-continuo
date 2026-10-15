@@ -3,10 +3,10 @@ import {
   drawCellInWindow,
   drawLayerInWindow,
   sliceWindows,
+  type Cell,
   type Layer,
   type Photo,
   type PresetId,
-  type Rect,
 } from "./geometry.ts";
 
 export interface ExportedSlide {
@@ -37,7 +37,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
 }
 
 export interface FilledCell {
-  rect: Rect;
+  cell: Cell;
   photo: Photo;
 }
 
@@ -66,7 +66,7 @@ export async function exportSlides(input: ExportInput): Promise<ExportedSlide[]>
     if (!ctx) throw new Error("Canvas 2D no disponible");
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    cells.forEach((c, k) => drawCellInWindow(ctx, c.rect, cellRadius, c.photo, cellImages[k]!, win));
+    cells.forEach((c, k) => drawCellInWindow(ctx, c.cell, cellRadius, c.photo, cellImages[k]!, win));
     layers.forEach((layer, k) => drawLayerInWindow(ctx, layer, images[k]!, win));
     out.push({
       blob: await canvasToBlob(canvas, "image/jpeg", 0.95),

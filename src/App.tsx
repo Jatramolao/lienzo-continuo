@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, Image as KImage, Layer as KLayer, Line, Rect as KRect, Stage, Text, Transformer } from "react-konva";
+import { Group, Image as KImage, Layer as KLayer, Line, Rect as KRect, Shape, Stage, Text, Transformer } from "react-konva";
 import type Konva from "konva";
 import {
   MAX_CELL_ZOOM,
@@ -9,11 +9,13 @@ import {
   focusFromOffset,
   newPhoto,
   photoRectInCell,
+  pointInPolygon,
   sliceWindows,
+  tracePolygon,
+  type Cell,
   type Layer,
   type Photo,
   type PresetId,
-  type Rect,
 } from "./geometry.ts";
 import { TEMPLATES, templateCells } from "./templates.ts";
 import { downloadSlides, exportSlides, loadImage, shareSlides, type FilledCell } from "./export.ts";
@@ -36,23 +38,8 @@ function useLoadedImage(src: string | undefined): HTMLImageElement | null {
   return image;
 }
 
-function roundedClip(ctx: Konva.Context, w: number, h: number, radius: number) {
-  const r = Math.max(0, Math.min(radius, w / 2, h / 2));
-  ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.lineTo(w - r, 0);
-  ctx.arcTo(w, 0, w, r, r);
-  ctx.lineTo(w, h - r);
-  ctx.arcTo(w, h, w - r, h, r);
-  ctx.lineTo(r, h);
-  ctx.arcTo(0, h, 0, h - r, r);
-  ctx.lineTo(0, r);
-  ctx.arcTo(0, 0, r, 0, r);
-  ctx.closePath();
-}
-
 function CellNode({
-  rect,
+  cell,
   radius,
   photo,
   selected,
@@ -60,7 +47,7 @@ function CellNode({
   onSelect,
   onPhotoChange,
 }: {
-  rect: Rect;
+  cell: Cell;
   radius: number;
   photo: Photo | undefined;
   selected: boolean;
@@ -68,12 +55,14 @@ function CellNode({
   onSelect: () => void;
   onPhotoChange: (patch: Partial<Photo>) => void;
 }) {
+  const rect = cell.bounds;
   const image = useLoadedImage(photo?.src);
   const p = photo ? photoRectInCell(rect, photo) : null;
+  const trace = (ctx: Konva.Context) => tracePolygon(ctx, cell.points, radius, -rect.x, -rect.y);
 
   return (
     <Group x={rect.x} y={rect.y}>
-      <Group clipFunc={(ctx) => roundedClip(ctx, rect.width, rect.height, radius)}>
+      <Group clipFunc={trace}>
         <KRect
           width={rect.width}
           height={rect.height}
@@ -119,10 +108,11 @@ function CellNode({
           listening={false}
         />
       )}
-      <KRect
-        width={rect.width}
-        height={rect.height}
-        cornerRadius={radius}
+      <Shape
+        sceneFunc={(ctx, shape) => {
+          trace(ctx);
+          ctx.strokeShape(shape);
+        }}
         stroke={selected ? ACCENT : "rgba(0,0,0,0.12)"}
         strokeWidth={(selected ? 3 : 1) / viewScale}
         listening={false}
@@ -230,7 +220,7 @@ export function App() {
       if (!box) return -1;
       const x = (clientX - box.left) / viewScale;
       const y = (clientY - box.top) / viewScale;
-      return cells.findIndex((c) => x >= c.x && x <= c.x + c.width && y >= c.y && y <= c.y + c.height);
+      return cells.findIndex((c) => pointInPolygon(c.points, x, y));
     },
     [cells, viewScale],
   );
@@ -320,7 +310,7 @@ export function App() {
   }, [removeSelected]);
 
   const selectedCellPhoto = selection?.kind === "cell" ? photos[selection.index] : undefined;
-  const filledCells: FilledCell[] = cells.flatMap((rect, i) => (photos[i] ? [{ rect, photo: photos[i]! }] : []));
+  const filledCells: FilledCell[] = cells.flatMap((cell, i) => (photos[i] ? [{ cell, photo: photos[i]! }] : []));
   const hasContent = filledCells.length > 0 || layers.length > 0;
 
   const run = async (mode: "download" | "share") => {
@@ -470,10 +460,10 @@ export function App() {
         >
           <KLayer>
             <KRect x={0} y={0} width={canvas.width} height={canvas.height} fill={BACKGROUND} onMouseDown={() => setSelection(null)} />
-            {cells.map((rect, i) => (
+            {cells.map((cell, i) => (
               <CellNode
                 key={`${templateId}-${i}`}
-                rect={rect}
+                cell={cell}
                 radius={radius}
                 photo={photos[i]}
                 selected={selection?.kind === "cell" && selection.index === i}
