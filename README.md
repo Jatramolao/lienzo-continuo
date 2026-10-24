@@ -3,7 +3,7 @@
 Editor web gratuito para crear carruseles de Instagram con **continuidad entre diapositivas**: un único lienzo ancho que se corta en N imágenes de 1080 px, con plantillas de celdas que pueden cruzar los cortes.
 
 - Todo se ejecuta en el navegador. No hay servidor, cuenta ni subida de archivos: **las fotos nunca salen del dispositivo**.
-- Formatos: 1:1 (1080×1080), 4:5 (1080×1350) y 16:9 (1080×566), de 1 a 20 diapositivas.
+- Formatos: 1:1 (1080×1080), 4:5 (1080×1350) y 1,91:1 (1080×566), de 1 a 20 diapositivas.
 - Plantillas de celdas con recorte, espacio y esquinas ajustables; capas libres con arrastre, escala y rotación.
 - Exporta una imagen JPG por diapositiva, o abre la hoja de compartir del móvil.
 
@@ -28,6 +28,8 @@ npm run build    # comprueba tipos y genera dist/
 | `src/templates.ts` | Plantillas de celdas (funciones puras que devuelven rectángulos). |
 | `src/export.ts` | Renderiza cada diapositiva a su tamaño final; descarga y hoja de compartir. |
 | `src/App.tsx` | Editor (React + Konva). |
+| `src/ui.tsx` | Piezas de interfaz: marca, borde de película, selector de formato y de plantillas. |
+| `src/styles.css` | Estilo "mesa de luz": tokens de color claro/oscuro, tira de película y diseño adaptable. |
 
 Para añadir una plantilla, agrega un objeto a `TEMPLATES` en `src/templates.ts`. Las pruebas comprueban automáticamente que cubra el lienzo sin huecos ni solapes.
 
@@ -44,3 +46,5 @@ El resultado es un sitio estático (`dist/`), sin funciones de servidor.
 ## Licencia
 
 MIT, ver [LICENSE](LICENSE). Dependencias principales: React, Konva y react-konva (todas MIT).
+
+Fuentes, empaquetadas con la app mediante Fontsource para no depender de servidores externos: Anybody, Familjen Grotesk y Martian Mono (todas SIL Open Font License 1.1).

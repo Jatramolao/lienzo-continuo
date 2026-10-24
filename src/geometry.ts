@@ -7,12 +7,14 @@ export interface SlideSize {
   width: number;
   height: number;
   label: string;
+  /** Proporción ancho:alto tal como la nombra Instagram. */
+  ratio: string;
 }
 
 export const PRESETS: Record<PresetId, SlideSize> = {
-  square: { width: 1080, height: 1080, label: "Cuadrado 1:1" },
-  portrait: { width: 1080, height: 1350, label: "Vertical 4:5" },
-  landscape: { width: 1080, height: 566, label: "Horizontal 16:9" },
+  square: { width: 1080, height: 1080, label: "Cuadrado", ratio: "1:1" },
+  portrait: { width: 1080, height: 1350, label: "Vertical", ratio: "4:5" },
+  landscape: { width: 1080, height: 566, label: "Horizontal", ratio: "1,91:1" },
 };
 
 export interface Rect {

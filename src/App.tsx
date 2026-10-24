@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Group, Image as KImage, Layer as KLayer, Line, Rect as KRect, Shape, Stage, Text, Transformer } from "react-konva";
 import type Konva from "konva";
 import {
@@ -19,9 +19,23 @@ import {
 } from "./geometry.ts";
 import { TEMPLATES, templateCells } from "./templates.ts";
 import { downloadSlides, exportSlides, loadImage, shareSlides, type FilledCell } from "./export.ts";
+import { FilmEdge, FormatPicker, Slider, Stepper, TemplatePicker, Wordmark } from "./ui.tsx";
 
+/** Fondo del lienzo; forma parte de las imágenes exportadas. */
 const BACKGROUND = "#f8fafc";
-const ACCENT = "#2563eb";
+// Colores que dibuja Konva (no lee variables CSS). Ninguno se exporta salvo el fondo.
+const CANVAS = {
+  seam: "#F2A93B",
+  seamUnder: "rgba(26, 21, 18, 0.28)",
+  empty: "#E3E7E5",
+  emptyMark: "#97A09C",
+  outline: "rgba(26, 21, 18, 0.14)",
+  select: "#FFFFFF",
+  selectUnder: "rgba(26, 21, 18, 0.6)",
+};
+/** Margen lateral de la tira de película alrededor del lienzo, en px de pantalla. */
+const FILM_INSET = 12;
+const MAX_SLIDES = 20;
 
 type Selection = { kind: "layer"; id: string } | { kind: "cell"; index: number } | null;
 
@@ -59,6 +73,10 @@ function CellNode({
   const image = useLoadedImage(photo?.src);
   const p = photo ? photoRectInCell(rect, photo) : null;
   const trace = (ctx: Konva.Context) => tracePolygon(ctx, cell.points, radius, -rect.x, -rect.y);
+  const outline = (ctx: Konva.Context, shape: Konva.Shape) => {
+    trace(ctx);
+    ctx.strokeShape(shape);
+  };
 
   return (
     <Group x={rect.x} y={rect.y}>
@@ -66,7 +84,7 @@ function CellNode({
         <KRect
           width={rect.width}
           height={rect.height}
-          fill={photo ? "#d4d4d8" : "#e4e4e7"}
+          fill={CANVAS.empty}
           onMouseDown={onSelect}
           onTouchStart={onSelect}
         />
@@ -103,20 +121,20 @@ function CellNode({
           height={rect.height}
           align="center"
           verticalAlign="middle"
-          fontSize={Math.min(rect.width, rect.height) * 0.25}
-          fill="#a1a1aa"
+          fontSize={Math.min(rect.width, rect.height) * 0.22}
+          fontStyle="300"
+          fill={CANVAS.emptyMark}
           listening={false}
         />
       )}
-      <Shape
-        sceneFunc={(ctx, shape) => {
-          trace(ctx);
-          ctx.strokeShape(shape);
-        }}
-        stroke={selected ? ACCENT : "rgba(0,0,0,0.12)"}
-        strokeWidth={(selected ? 3 : 1) / viewScale}
-        listening={false}
-      />
+      {selected ? (
+        <>
+          <Shape sceneFunc={outline} stroke={CANVAS.selectUnder} strokeWidth={6 / viewScale} listening={false} />
+          <Shape sceneFunc={outline} stroke={CANVAS.select} strokeWidth={2.5 / viewScale} listening={false} />
+        </>
+      ) : (
+        <Shape sceneFunc={outline} stroke={CANVAS.outline} strokeWidth={1 / viewScale} listening={false} />
+      )}
     </Group>
   );
 }
@@ -166,7 +184,18 @@ function LayerNode({
         }}
       />
       {selected && (
-        <Transformer ref={trRef} keepRatio rotateEnabled enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right"]} />
+        <Transformer
+          ref={trRef}
+          keepRatio
+          rotateEnabled
+          enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right"]}
+          borderStroke={CANVAS.select}
+          borderStrokeWidth={2}
+          anchorStroke={CANVAS.selectUnder}
+          anchorFill={CANVAS.select}
+          anchorSize={11}
+          anchorCornerRadius={2}
+        />
       )}
     </>
   );
@@ -187,10 +216,15 @@ export function App() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [wrapWidth, setWrapWidth] = useState(900);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
 
   const canvas = useMemo(() => canvasSize(preset, slideCount), [preset, slideCount]);
   const windows = useMemo(() => sliceWindows(preset, slideCount), [preset, slideCount]);
-  const viewScale = (wrapWidth - 24) / canvas.width;
+  // El lienzo ocupa el ancho disponible sin pasar de ~58% del alto de la ventana (una sola
+  // diapositiva vertical no debe obligar a desplazarse para ver los controles).
+  const viewScale = Math.min((wrapWidth - FILM_INSET * 2) / canvas.width, Math.max(220, viewportHeight * 0.58) / canvas.height);
+  const stageWidth = Math.floor(canvas.width * viewScale);
+  const stageHeight = Math.floor(canvas.height * viewScale);
   const template = TEMPLATES.find((t) => t.id === templateId);
   const cells = useMemo(
     () =>
@@ -206,7 +240,12 @@ export function App() {
     const ro = new ResizeObserver(() => setWrapWidth(el.clientWidth));
     ro.observe(el);
     setWrapWidth(el.clientWidth);
-    return () => ro.disconnect();
+    const onResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", onResize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
 
   // Si la plantilla cambia y la celda seleccionada ya no existe, se deselecciona.
@@ -329,11 +368,11 @@ export function App() {
         const shared = await shareSlides(slides);
         if (!shared) {
           await downloadSlides(slides);
-          setMessage("Este navegador no puede compartir archivos; se descargaron las imágenes.");
+          setMessage(`Este navegador no puede compartir archivos: se descargaron las ${slides.length} imágenes.`);
         }
       } else {
         await downloadSlides(slides);
-        setMessage(`${slides.length} imágenes exportadas.`);
+        setMessage(`${slides.length} ${slides.length === 1 ? "imagen descargada" : "imágenes descargadas"}.`);
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -343,158 +382,192 @@ export function App() {
     }
   };
 
+  const selectedLabel =
+    selection?.kind === "cell" ? `Celda ${selection.index + 1}` : selection?.kind === "layer" ? "Foto libre" : null;
+  const contextHint =
+    selection?.kind === "cell"
+      ? selectedCellPhoto
+        ? "Arrastra la foto para encuadrarla y ajusta el zoom."
+        : "Las fotos que añadas empiezan en esta celda."
+      : selection?.kind === "layer"
+        ? "Arrastra para mover; usa los tiradores para escalar y girar."
+        : cells.length
+          ? "Suelta fotos sobre el lienzo o añádelas: se colocan en orden en las celdas vacías."
+          : "Suelta fotos sobre el lienzo o añádelas: quedan sueltas para moverlas, escalarlas y girarlas.";
+
   return (
     <div className="app">
-      <div className="bar">
-        <label>
-          Formato
-          <select value={preset} onChange={(e) => setPreset(e.target.value as PresetId)}>
-            {Object.entries(PRESETS).map(([id, p]) => (
-              <option key={id} value={id}>
-                {p.label} · {p.width}×{p.height}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Diapositivas
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={slideCount}
-            onChange={(e) => setSlideCount(Math.min(20, Math.max(1, Number(e.target.value) || 1)))}
-          />
-        </label>
-        <label>
-          Plantilla
-          <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} title={template?.description}>
-            <option value="">Sin plantilla (libre)</option>
-            {TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Espacio
-          <input type="range" min={0} max={80} value={gap} onChange={(e) => setGap(Number(e.target.value))} />
-          {gap}px
-        </label>
-        <label>
-          Esquinas
-          <input type="range" min={0} max={120} value={radius} onChange={(e) => setRadius(Number(e.target.value))} />
-          {radius}px
-        </label>
-      </div>
-      <div className="bar">
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          id="file"
-          onChange={(e) => {
-            if (e.target.files) void addFiles(e.target.files, selection?.kind === "cell" ? selection.index : undefined);
-            e.target.value = "";
+      <header className="top">
+        <div className="brand">
+          <Wordmark />
+          <p className="tagline">Carruseles de Instagram que continúan de una diapositiva a la siguiente.</p>
+        </div>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !hasContent}
+            title={hasContent ? undefined : "Añade al menos una foto"}
+            onClick={() => run("download")}
+          >
+            Descargar {slideCount} JPG
+          </button>
+          <button type="button" className="btn" disabled={busy || !hasContent} onClick={() => run("share")}>
+            Compartir
+          </button>
+        </div>
+      </header>
+
+      <main className="work">
+        <div
+          ref={wrapRef}
+          className="stage-area"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
           }}
-        />
-        <button className="ghost" onClick={() => document.getElementById("file")?.click()}>
-          Añadir fotos
-        </button>
-        {selectedCellPhoto && selection?.kind === "cell" && (
-          <label>
-            Zoom
-            <input
-              type="range"
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            const target = cellAt(e.clientX, e.clientY);
+            void addFiles(e.dataTransfer.files, target >= 0 ? target : undefined);
+          }}
+        >
+          <div
+            className={`film${dragging ? " is-drop" : ""}`}
+            style={{ width: stageWidth + FILM_INSET * 2, paddingInline: FILM_INSET, "--inset": `${FILM_INSET}px` } as CSSProperties}
+          >
+            <FilmEdge side="top" preset={preset} slideCount={slideCount} canvasWidth={canvas.width} canvasHeight={canvas.height} slideWidthPx={stageWidth / slideCount} />
+            <Stage
+              ref={stageRef}
+              className="stage"
+              width={stageWidth}
+              height={stageHeight}
+              scaleX={viewScale}
+              scaleY={viewScale}
+              onMouseDown={(e) => e.target === e.target.getStage() && setSelection(null)}
+            >
+              <KLayer>
+                <KRect x={0} y={0} width={canvas.width} height={canvas.height} fill={BACKGROUND} onMouseDown={() => setSelection(null)} />
+                {cells.map((cell, i) => (
+                  <CellNode
+                    key={`${templateId}-${i}`}
+                    cell={cell}
+                    radius={radius}
+                    photo={photos[i]}
+                    selected={selection?.kind === "cell" && selection.index === i}
+                    viewScale={viewScale}
+                    onSelect={() => setSelection({ kind: "cell", index: i })}
+                    onPhotoChange={(patch) => patchPhoto(i, patch)}
+                  />
+                ))}
+                {layers.map((l) => (
+                  <LayerNode
+                    key={l.id}
+                    layer={l}
+                    selected={selection?.kind === "layer" && selection.id === l.id}
+                    onSelect={() => setSelection({ kind: "layer", id: l.id })}
+                    onChange={(patch) => patchLayer(l.id, patch)}
+                  />
+                ))}
+              </KLayer>
+              <KLayer listening={false}>
+                {windows.slice(1).map((w) => (
+                  <Group key={w.x}>
+                    <Line points={[w.x, 0, w.x, canvas.height]} stroke={CANVAS.seamUnder} strokeWidth={4 / viewScale} />
+                    <Line
+                      points={[w.x, 0, w.x, canvas.height]}
+                      stroke={CANVAS.seam}
+                      strokeWidth={2 / viewScale}
+                      dash={[7 / viewScale, 5 / viewScale]}
+                    />
+                  </Group>
+                ))}
+              </KLayer>
+            </Stage>
+            <FilmEdge side="bottom" preset={preset} slideCount={slideCount} canvasWidth={canvas.width} canvasHeight={canvas.height} slideWidthPx={stageWidth / slideCount} />
+          </div>
+        </div>
+
+        <div className="context">
+          <button type="button" className="btn" onClick={() => document.getElementById("file")?.click()}>
+            Añadir fotos
+          </button>
+          {selectedLabel && <span className="context-tag">{selectedLabel}</span>}
+          {(selection?.kind === "layer" || selectedCellPhoto) && (
+            <button type="button" className="btn btn-quiet" onClick={removeSelected}>
+              {selection?.kind === "cell" ? "Quitar foto" : "Eliminar"}
+            </button>
+          )}
+          {selection?.kind === "layer" && (
+            <>
+              <button type="button" className="btn btn-quiet" title="Poner esta foto por delante de las demás" onClick={() => moveSelected(1)}>
+                Adelante
+              </button>
+              <button type="button" className="btn btn-quiet" title="Poner esta foto por detrás de las demás" onClick={() => moveSelected(-1)}>
+                Atrás
+              </button>
+            </>
+          )}
+          {selectedCellPhoto && selection?.kind === "cell" && (
+            <Slider
+              label="Zoom"
               min={1}
               max={MAX_CELL_ZOOM}
               step={0.01}
               value={selectedCellPhoto.zoom}
-              onChange={(e) => patchPhoto(selection.index, { zoom: Number(e.target.value) })}
+              format={(v) => `${v.toFixed(2)}×`}
+              onChange={(v) => patchPhoto(selection.index, { zoom: v })}
             />
-            {selectedCellPhoto.zoom.toFixed(2)}×
-          </label>
+          )}
+          <p className="context-hint">{contextHint}</p>
+        </div>
+        <p className="status" role="status" aria-live="polite">
+          {message}
+        </p>
+      </main>
+
+      <aside className="side">
+        <section className="group" aria-labelledby="g-format">
+          <h2 className="eyebrow" id="g-format">
+            Formato
+          </h2>
+          <FormatPicker value={preset} onChange={setPreset} />
+          <div className="row">
+            <span className="row-label">Diapositivas</span>
+            <Stepper value={slideCount} min={1} max={MAX_SLIDES} onChange={setSlideCount} />
+          </div>
+        </section>
+        <section className="group" aria-labelledby="g-template">
+          <h2 className="eyebrow" id="g-template">
+            Plantilla
+          </h2>
+          <TemplatePicker value={templateId} preset={preset} slideCount={slideCount} onChange={setTemplateId} />
+        </section>
+        {template && (
+          <section className="group" aria-labelledby="g-cells">
+            <h2 className="eyebrow" id="g-cells">
+              Celdas
+            </h2>
+            <Slider label="Espacio" min={0} max={80} value={gap} format={(v) => `${v} px`} onChange={setGap} />
+            <Slider label="Esquinas" min={0} max={120} value={radius} format={(v) => `${v} px`} onChange={setRadius} />
+          </section>
         )}
-        <button className="ghost" disabled={selection?.kind !== "layer"} onClick={() => moveSelected(1)}>
-          Subir
-        </button>
-        <button className="ghost" disabled={selection?.kind !== "layer"} onClick={() => moveSelected(-1)}>
-          Bajar
-        </button>
-        <button className="ghost" disabled={!selection || (selection.kind === "cell" && !selectedCellPhoto)} onClick={removeSelected}>
-          {selection?.kind === "cell" ? "Quitar foto" : "Eliminar"}
-        </button>
-        <span className="spacer" />
-        <button disabled={busy || !hasContent} onClick={() => run("download")}>
-          Exportar JPG
-        </button>
-        <button className="ghost" disabled={busy || !hasContent} onClick={() => run("share")}>
-          Compartir
-        </button>
-      </div>
+        <p className="privacy">Las fotos no salen de este dispositivo: todo se procesa en tu navegador.</p>
+      </aside>
 
-      <div
-        ref={wrapRef}
-        className={`stage-wrap${dragging ? " drag" : ""}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
+      <input
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        id="file"
+        onChange={(e) => {
+          if (e.target.files) void addFiles(e.target.files, selection?.kind === "cell" ? selection.index : undefined);
+          e.target.value = "";
         }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          const target = cellAt(e.clientX, e.clientY);
-          void addFiles(e.dataTransfer.files, target >= 0 ? target : undefined);
-        }}
-      >
-        <Stage
-          ref={stageRef}
-          width={canvas.width * viewScale}
-          height={canvas.height * viewScale}
-          scaleX={viewScale}
-          scaleY={viewScale}
-          onMouseDown={(e) => e.target === e.target.getStage() && setSelection(null)}
-        >
-          <KLayer>
-            <KRect x={0} y={0} width={canvas.width} height={canvas.height} fill={BACKGROUND} onMouseDown={() => setSelection(null)} />
-            {cells.map((cell, i) => (
-              <CellNode
-                key={`${templateId}-${i}`}
-                cell={cell}
-                radius={radius}
-                photo={photos[i]}
-                selected={selection?.kind === "cell" && selection.index === i}
-                viewScale={viewScale}
-                onSelect={() => setSelection({ kind: "cell", index: i })}
-                onPhotoChange={(patch) => patchPhoto(i, patch)}
-              />
-            ))}
-            {layers.map((l) => (
-              <LayerNode
-                key={l.id}
-                layer={l}
-                selected={selection?.kind === "layer" && selection.id === l.id}
-                onSelect={() => setSelection({ kind: "layer", id: l.id })}
-                onChange={(patch) => patchLayer(l.id, patch)}
-              />
-            ))}
-          </KLayer>
-          <KLayer listening={false}>
-            {windows.slice(1).map((w) => (
-              <Line key={w.x} points={[w.x, 0, w.x, canvas.height]} stroke={ACCENT} strokeWidth={2 / viewScale} dash={[10 / viewScale, 8 / viewScale]} />
-            ))}
-          </KLayer>
-        </Stage>
-      </div>
-
-      <div className="hint">
-        {message ||
-          `Lienzo de ${canvas.width}×${canvas.height}px. Las líneas azules son los cortes de cada diapositiva. Pulsa una celda y añade fotos (o suéltalas encima); arrastra la foto para encuadrarla y usa la rueda o el control de zoom. Las celdas que cruzan una línea azul dan la continuidad.`}
-      </div>
-      <div className="hint">Tus fotos se procesan en este dispositivo y no se suben a ningún servidor.</div>
+      />
     </div>
   );
 }

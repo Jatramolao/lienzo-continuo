@@ -13,6 +13,9 @@
     "test": "node --experimental-strip-types --test src/geometry.test.ts"
   },
   "dependencies": {
+    "@fontsource-variable/anybody": "^5.3.0",
+    "@fontsource-variable/familjen-grotesk": "^5.3.0",
+    "@fontsource-variable/martian-mono": "^5.3.0",
     "konva": "^10.9.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
