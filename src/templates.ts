@@ -91,6 +91,20 @@ function bridgeXs(n: number): number[] {
   return xs;
 }
 
+/** Inclinación de los cortes de "Tiras inclinadas", en diapositivas entre el borde superior y el inferior. */
+const SLANT = 0.3;
+
+/**
+ * Posiciones superiores de los cortes que reparten el lienzo en n + 1 tiras del mismo ancho medio.
+ * Cada corte se adelanta `slant / 2` para que su posición media (a media altura) caiga justo en
+ * i · n/(n+1): así la primera y la última tira, que solo tienen un lado inclinado, no resultan más
+ * anchas o estrechas que las del medio. Con n/(n+1) < 1 cada tira interior cruza un corte de diapositiva.
+ */
+function evenSlantedXs(n: number, slant: number): number[] {
+  const step = n / (n + 1);
+  return [0, ...Array.from({ length: n }, (_, i) => (i + 1) * step - slant / 2), n];
+}
+
 export const TEMPLATES: Template[] = [
   {
     id: "one-per-slide",
@@ -181,8 +195,8 @@ export const TEMPLATES: Template[] = [
   {
     id: "slanted-strips",
     name: "Tiras inclinadas",
-    description: "Tiras de alto completo con cortes diagonales; cada una cruza un corte de diapositiva.",
-    cells: (ctx) => bandPolygons(ctx, [{ top: flat(0), bottom: flat(1), xs: offsetXs(ctx.slideCount, 0.5), slant: 0.3 }]),
+    description: "Tiras de alto completo con cortes diagonales y el mismo ancho; las interiores cruzan un corte de diapositiva.",
+    cells: (ctx) => bandPolygons(ctx, [{ top: flat(0), bottom: flat(1), xs: evenSlantedXs(ctx.slideCount, SLANT), slant: SLANT }]),
   },
   {
     id: "tilted-horizon",

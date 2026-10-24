@@ -188,6 +188,26 @@ test("las plantillas de cortes cruzados tienen celdas que cruzan cada corte y ni
   }
 });
 
+test("las tiras inclinadas tienen todas la misma área y ninguna queda más estrecha de media diapositiva", () => {
+  const t = TEMPLATES.find((x) => x.id === "slanted-strips")!;
+  for (const n of [1, 2, 3, 5, 10]) {
+    const cells = templateCells(t, CTX(n), 0);
+    assert.equal(cells.length, n + 1);
+    const areas = cells.map((c) => polygonArea(c.points));
+    assert.ok(Math.min(...areas) / Math.max(...areas) > 0.999, `n=${n}: áreas desiguales (${areas.map(Math.round)})`);
+    for (const c of cells) {
+      // Anchura de la celda a media altura, donde las tiras inclinadas tienen su ancho medio.
+      const mid = c.bounds.y + c.bounds.height / 2;
+      const xs: number[] = [];
+      c.points.forEach((a, i) => {
+        const b = c.points[(i + 1) % c.points.length]!;
+        if ((a.y - mid) * (b.y - mid) < 0) xs.push(a.x + ((mid - a.y) / (b.y - a.y)) * (b.x - a.x));
+      });
+      assert.ok(Math.max(...xs) - Math.min(...xs) >= 540, `n=${n}: celda más estrecha de media diapositiva`);
+    }
+  }
+});
+
 test("las plantillas diagonales tienen aristas que no son horizontales ni verticales", () => {
   for (const id of ["slanted-strips", "tilted-horizon"]) {
     const t = TEMPLATES.find((x) => x.id === id)!;
