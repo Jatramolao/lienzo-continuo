@@ -1,8 +1,27 @@
 // Piezas de interfaz sin estado propio: marca, bordes de película, selector de plantillas,
 // controles de formato y número de diapositivas. Todo el estado vive en App.
 
+import { useEffect, useState } from "react";
 import { PRESETS, type PresetId } from "./geometry.ts";
 import { TEMPLATES, templateCells, type Template } from "./templates.ts";
+
+/**
+ * Teléfono en horizontal: poco alto. Aquí la página no se desplaza y el lienzo y las herramientas
+ * van lado a lado. Debe coincidir con la consulta de medios homónima de styles.css.
+ */
+export const COMPACT_LANDSCAPE = "(orientation: landscape) and (max-height: 540px)";
+
+export function useCompactLandscape(): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(COMPACT_LANDSCAPE).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(COMPACT_LANDSCAPE);
+    const onChange = () => setMatches(mq.matches);
+    mq.addEventListener("change", onChange);
+    onChange();
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return matches;
+}
 
 /** Nombre de la herramienta, con un corte de diapositiva que atraviesa la palabra "continuo". */
 export function Wordmark() {

@@ -20,7 +20,7 @@ import {
 import { TEMPLATES, templateCells } from "./templates.ts";
 import { downloadSlides, exportSlides, shareSlides, type FilledCell } from "./export.ts";
 import { claimImages, discardImages, getImage, importImage, retainOnly } from "./images.ts";
-import { FilmEdge, FormatPicker, Slider, Stepper, TemplatePicker, Wordmark } from "./ui.tsx";
+import { FilmEdge, FormatPicker, Slider, Stepper, TemplatePicker, Wordmark, useCompactLandscape } from "./ui.tsx";
 
 /** Fondo del lienzo; forma parte de las imágenes exportadas. */
 const BACKGROUND = "#f8fafc";
@@ -36,6 +36,9 @@ const CANVAS = {
 };
 /** Margen lateral de la tira de película alrededor del lienzo, en px de pantalla. */
 const FILM_INSET = 12;
+/** Margen superior e inferior de la tira (donde van las perforaciones y la impresión de borde). */
+const FILM_PAD = 34;
+const FILM_PAD_COMPACT = 20;
 const MAX_SLIDES = 20;
 
 type Selection = { kind: "layer"; id: string } | { kind: "cell"; index: number } | null;
@@ -209,15 +212,23 @@ export function App() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [wrapWidth, setWrapWidth] = useState(900);
+  const [wrapHeight, setWrapHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  const compact = useCompactLandscape();
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
   const canvas = useMemo(() => canvasSize(preset, slideCount), [preset, slideCount]);
   const windows = useMemo(() => sliceWindows(preset, slideCount), [preset, slideCount]);
-  // El lienzo ocupa el ancho disponible sin pasar de ~58% del alto de la ventana (una sola
-  // diapositiva vertical no debe obligar a desplazarse para ver los controles).
-  const viewScale = Math.min((wrapWidth - FILM_INSET * 2) / canvas.width, Math.max(220, viewportHeight * 0.58) / canvas.height);
+  const filmPadBlock = compact ? FILM_PAD_COMPACT : FILM_PAD;
+  // Con la página en columna, el lienzo ocupa el ancho disponible sin pasar de ~58% del alto de la
+  // ventana (una sola diapositiva vertical no debe obligar a desplazarse para ver los controles).
+  // En móvil horizontal la página no se desplaza: el lienzo se ajusta a la altura que le deja el diseño.
+  const maxStageHeight = compact ? wrapHeight - filmPadBlock * 2 : Math.max(220, viewportHeight * 0.58);
+  const viewScale = Math.max(
+    0.01,
+    Math.min((wrapWidth - FILM_INSET * 2) / canvas.width, maxStageHeight / canvas.height),
+  );
   const stageWidth = Math.floor(canvas.width * viewScale);
   const stageHeight = Math.floor(canvas.height * viewScale);
   const template = TEMPLATES.find((t) => t.id === templateId);
@@ -232,10 +243,19 @@ export function App() {
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWrapWidth(el.clientWidth));
+    const measure = () => {
+      setWrapWidth(el.clientWidth);
+      setWrapHeight(el.clientHeight);
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setWrapWidth(el.clientWidth);
-    const onResize = () => setViewportHeight(window.innerHeight);
+    measure();
+    // También en `resize`: leer el tamaño fuerza un diseño actualizado y no depende de cuándo
+    // entregue el navegador el aviso del observador (al girar el teléfono llega con un cuadro de retraso).
+    const onResize = () => {
+      setViewportHeight(window.innerHeight);
+      measure();
+    };
     window.addEventListener("resize", onResize);
     return () => {
       ro.disconnect();
@@ -449,7 +469,14 @@ export function App() {
         >
           <div
             className={`film${dragging ? " is-drop" : ""}`}
-            style={{ width: stageWidth + FILM_INSET * 2, paddingInline: FILM_INSET, "--inset": `${FILM_INSET}px` } as CSSProperties}
+            style={
+              {
+                width: stageWidth + FILM_INSET * 2,
+                paddingInline: FILM_INSET,
+                paddingBlock: filmPadBlock,
+                "--inset": `${FILM_INSET}px`,
+              } as CSSProperties
+            }
           >
             <FilmEdge side="top" preset={preset} slideCount={slideCount} canvasWidth={canvas.width} canvasHeight={canvas.height} slideWidthPx={stageWidth / slideCount} />
             <Stage
