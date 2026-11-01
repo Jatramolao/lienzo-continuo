@@ -6,6 +6,7 @@ import {
   fitScale,
   focusFromOffset,
   insetPolygon,
+  layerBounds,
   newPhoto,
   photoRectInCell,
   pointInPolygon,
@@ -225,6 +226,31 @@ test("las plantillas diagonales tienen aristas que no son horizontales ni vertic
 test("los identificadores de plantilla son únicos", () => {
   const ids = TEMPLATES.map((t) => t.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test("layerBounds sin rotación es la propia capa escalada", () => {
+  const l = { ...centeredLayer("a", "img", 1000, 500, { width: 3000, height: 1000 }, "contain"), x: 100, y: 50, scale: 2, rotation: 0 };
+  assert.deepEqual(layerBounds(l), { x: 100, y: 50, width: 2000, height: 1000 });
+});
+
+test("layerBounds con rotación contiene las cuatro esquinas de la capa", () => {
+  for (const rotation of [30, 90, 180, -45, 270]) {
+    const l = { ...centeredLayer("a", "img", 400, 200, { width: 1000, height: 1000 }), x: 500, y: 300, scale: 1.5, rotation };
+    const b = layerBounds(l);
+    const a = (rotation * Math.PI) / 180;
+    const w = 400 * 1.5;
+    const h = 200 * 1.5;
+    const corners = [[0, 0], [w, 0], [0, h], [w, h]].map(([cx, cy]) => ({
+      x: l.x + cx! * Math.cos(a) - cy! * Math.sin(a),
+      y: l.y + cx! * Math.sin(a) + cy! * Math.cos(a),
+    }));
+    for (const c of corners) {
+      assert.ok(c.x >= b.x - 1e-6 && c.x <= b.x + b.width + 1e-6, `rot ${rotation}: x fuera`);
+      assert.ok(c.y >= b.y - 1e-6 && c.y <= b.y + b.height + 1e-6, `rot ${rotation}: y fuera`);
+    }
+    // Ajustada: alguna esquina toca cada borde.
+    assert.ok(corners.some((c) => Math.abs(c.x - b.x) < 1e-6) && corners.some((c) => Math.abs(c.x - (b.x + b.width)) < 1e-6));
+  }
 });
 
 test("la plantilla panorámica tiene una celda que cruza todos los cortes", () => {

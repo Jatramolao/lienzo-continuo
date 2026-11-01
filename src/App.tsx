@@ -18,7 +18,8 @@ import {
   type PresetId,
 } from "./geometry.ts";
 import { TEMPLATES, templateCells } from "./templates.ts";
-import { downloadSlides, exportSlides, loadImage, shareSlides, type FilledCell } from "./export.ts";
+import { downloadSlides, exportSlides, shareSlides, type FilledCell } from "./export.ts";
+import { claimImages, discardImages, getImage, importImage, retainOnly } from "./images.ts";
 import { FilmEdge, FormatPicker, Slider, Stepper, TemplatePicker, Wordmark } from "./ui.tsx";
 
 /** Fondo del lienzo; forma parte de las imágenes exportadas. */
@@ -39,17 +40,9 @@ const MAX_SLIDES = 20;
 
 type Selection = { kind: "layer"; id: string } | { kind: "cell"; index: number } | null;
 
-function useLoadedImage(src: string | undefined): HTMLImageElement | null {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-  useEffect(() => {
-    if (!src) return setImage(null);
-    let alive = true;
-    loadImage(src).then((img) => alive && setImage(img));
-    return () => {
-      alive = false;
-    };
-  }, [src]);
-  return image;
+/** Copia reducida de la foto para dibujarla en el editor; null si ya no está en el registro. */
+function previewOf(imageId: string | undefined): ImageBitmap | null {
+  return (imageId && getImage(imageId)?.preview) || null;
 }
 
 function CellNode({
@@ -70,7 +63,7 @@ function CellNode({
   onPhotoChange: (patch: Partial<Photo>) => void;
 }) {
   const rect = cell.bounds;
-  const image = useLoadedImage(photo?.src);
+  const image = previewOf(photo?.imageId);
   const p = photo ? photoRectInCell(rect, photo) : null;
   const trace = (ctx: Konva.Context) => tracePolygon(ctx, cell.points, radius, -rect.x, -rect.y);
   const outline = (ctx: Konva.Context, shape: Konva.Shape) => {
@@ -150,7 +143,7 @@ function LayerNode({
   onSelect: () => void;
   onChange: (patch: Partial<Layer>) => void;
 }) {
-  const image = useLoadedImage(layer.src);
+  const image = previewOf(layer.imageId);
   const nodeRef = useRef<Konva.Image>(null);
   const trRef = useRef<Konva.Transformer>(null);
 
@@ -217,6 +210,8 @@ export function App() {
   const stageRef = useRef<Konva.Stage>(null);
   const [wrapWidth, setWrapWidth] = useState(900);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
 
   const canvas = useMemo(() => canvasSize(preset, slideCount), [preset, slideCount]);
   const windows = useMemo(() => sliceWindows(preset, slideCount), [preset, slideCount]);
@@ -267,48 +262,66 @@ export function App() {
   /** Reparte archivos: empieza en `startCell` y rellena las celdas vacías; el resto pasa a capas libres. */
   const addFiles = useCallback(
     async (files: FileList | File[], startCell?: number) => {
-      const loaded: { src: string; w: number; h: number }[] = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/")) continue;
-        const src = URL.createObjectURL(file);
-        const img = await loadImage(src);
-        loaded.push({ src, w: img.naturalWidth, h: img.naturalHeight });
+      // Se abren de una en una: en todo momento hay como mucho un original decodificado.
+      const candidates = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (!candidates.length) return;
+      const loaded: Awaited<ReturnType<typeof importImage>>[] = [];
+      const failed: string[] = [];
+      for (const [i, file] of candidates.entries()) {
+        if (candidates.length > 1) setMessage(`Abriendo fotos… ${i + 1} de ${candidates.length}`);
+        try {
+          loaded.push(await importImage(file));
+        } catch {
+          failed.push(file.name);
+        }
       }
+      setMessage(
+        failed.length
+          ? `No se pudo abrir ${failed.length === 1 ? "esta foto" : "estas fotos"}: ${failed.join(", ")}. Prueba con JPG, PNG o WebP.`
+          : "",
+      );
       if (!loaded.length) return;
 
+      // Estado actual, no el de cuando empezó la importación: el usuario pudo editar mientras tanto.
+      const taken = photosRef.current;
       const nextPhotos: Record<number, Photo> = {};
-      const rest: typeof loaded = [];
       const queue = [...loaded];
       let lastCell = -1;
-      if (startCell !== undefined && startCell >= 0 && queue.length) {
+      const place = (cellIndex: number) => {
         const f = queue.shift()!;
-        nextPhotos[startCell] = newPhoto(f.src, f.w, f.h);
-        lastCell = startCell;
-      }
-      const order = cells.map((_, i) => i);
+        nextPhotos[cellIndex] = newPhoto(f.id, f.naturalWidth, f.naturalHeight);
+        lastCell = cellIndex;
+      };
+      if (startCell !== undefined && startCell >= 0 && startCell < cells.length && queue.length) place(startCell);
       const from = startCell !== undefined && startCell >= 0 ? startCell : 0;
-      const rotated = [...order.slice(from), ...order.slice(0, from)];
-      for (const i of rotated) {
+      const order = cells.map((_, i) => i);
+      for (const i of [...order.slice(from), ...order.slice(0, from)]) {
         if (!queue.length) break;
-        if (photos[i] || nextPhotos[i]) continue;
-        const f = queue.shift()!;
-        nextPhotos[i] = newPhoto(f.src, f.w, f.h);
-        lastCell = i;
+        if (taken[i] || nextPhotos[i]) continue;
+        place(i);
       }
-      rest.push(...queue);
+      const rest = queue;
 
+      // Las imágenes pasan a ser del estado: desde aquí se liberan cuando nadie las referencia.
+      claimImages(loaded.map((f) => f.id));
       if (Object.keys(nextPhotos).length) {
         setPhotos((prev) => ({ ...prev, ...nextPhotos }));
         setSelection({ kind: "cell", index: lastCell });
       }
       if (rest.length) {
-        const added = rest.map((f) => centeredLayer(crypto.randomUUID(), f.src, f.w, f.h, canvas));
+        const added = rest.map((f) => centeredLayer(crypto.randomUUID(), f.id, f.naturalWidth, f.naturalHeight, canvas));
         setLayers((prev) => [...prev, ...added]);
         setSelection({ kind: "layer", id: added[added.length - 1]!.id });
       }
+      discardImages(loaded.map((f) => f.id)); // no-op si todas se usaron; cubre cualquier resto sin dueño
     },
-    [canvas, cells, photos],
+    [canvas, cells],
   );
+
+  // Libera la memoria de las fotos que ya no están en ninguna celda ni capa.
+  useEffect(() => {
+    retainOnly(new Set([...Object.values(photos).map((p) => p.imageId), ...layers.map((l) => l.imageId)]));
+  }, [photos, layers]);
 
   const patchLayer = (id: string, patch: Partial<Layer>) =>
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));

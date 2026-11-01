@@ -27,7 +27,8 @@ export interface Rect {
 /** Capa de imagen en coordenadas del lienzo continuo. La rotación es en grados, alrededor de (x, y). */
 export interface Layer {
   id: string;
-  src: string;
+  /** Identificador de la imagen en el registro de `images.ts`. */
+  imageId: string;
   naturalWidth: number;
   naturalHeight: number;
   x: number;
@@ -65,7 +66,7 @@ export function fitScale(
 /** Capa nueva centrada en el lienzo, ajustada en modo contain. */
 export function centeredLayer(
   id: string,
-  src: string,
+  imageId: string,
   naturalWidth: number,
   naturalHeight: number,
   canvas: { width: number; height: number },
@@ -74,7 +75,7 @@ export function centeredLayer(
   const scale = fitScale({ width: naturalWidth, height: naturalHeight }, canvas, mode);
   return {
     id,
-    src,
+    imageId,
     naturalWidth,
     naturalHeight,
     scale,
@@ -82,6 +83,21 @@ export function centeredLayer(
     x: (canvas.width - naturalWidth * scale) / 2,
     y: (canvas.height - naturalHeight * scale) / 2,
   };
+}
+
+/** Caja que contiene a la capa ya escalada y girada, en coordenadas del lienzo. */
+export function layerBounds(layer: Layer): Rect {
+  const w = layer.naturalWidth * layer.scale;
+  const h = layer.naturalHeight * layer.scale;
+  const a = (layer.rotation * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  // La rotación es alrededor de (x, y), la esquina superior izquierda.
+  const xs = [0, w * cos, -h * sin, w * cos - h * sin];
+  const ys = [0, w * sin, h * cos, w * sin + h * cos];
+  const x = layer.x + Math.min(...xs);
+  const y = layer.y + Math.min(...ys);
+  return { x, y, width: Math.max(...xs) + layer.x - x, height: Math.max(...ys) + layer.y - y };
 }
 
 /** Dibuja una capa dentro de la ventana de recorte `window` (desplazando el origen). */
@@ -105,7 +121,8 @@ export function drawLayerInWindow(
 // a cambios de plantilla, formato o número de diapositivas.
 
 export interface Photo {
-  src: string;
+  /** Identificador de la imagen en el registro de `images.ts`; las dimensiones son las del original. */
+  imageId: string;
   naturalWidth: number;
   naturalHeight: number;
   /** Zoom sobre el ajuste cover; mínimo 1 para que la celda quede siempre cubierta. */
@@ -119,8 +136,8 @@ export const MAX_CELL_ZOOM = 4;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
-export function newPhoto(src: string, naturalWidth: number, naturalHeight: number): Photo {
-  return { src, naturalWidth, naturalHeight, zoom: 1, focusX: 0.5, focusY: 0.5 };
+export function newPhoto(imageId: string, naturalWidth: number, naturalHeight: number): Photo {
+  return { imageId, naturalWidth, naturalHeight, zoom: 1, focusX: 0.5, focusY: 0.5 };
 }
 
 /** Rectángulo donde se dibuja la foto, relativo a la esquina superior izquierda de la celda. */
